@@ -1,0 +1,21 @@
+{
+  "name": "easygento/magento2-create-tax-rates-and-rules",
+  "version": "1.0.0",
+  "description": "Easygento CreateTaxRatesAndRules module",
+  "type": "magento2-module",
+  "require": {
+    "magento/framework": "*",
+    "magento/module-tax": "100.4.*"
+  },
+  "license": [
+    "Proprietary"
+  ],
+  "autoload": {
+    "files": [
+      "registration.php"
+    ],
+    "psr-4": {
+      "Easygento\\CreateTaxRatesAndRules\\": ""
+    }
+  }
+}
