@@ -15,16 +15,14 @@ use Magento\Framework\Module\Dir;
 use Magento\Framework\Setup\Patch\DataPatchInterface;
 use Magento\Store\Model\ResourceModel\Store\Collection as ResourceModelStoreCollection;
 use Magento\Tax\Api\Data\TaxClassInterface;
-use Magento\Tax\Api\Data\TaxRuleInterface;
 use Magento\Tax\Api\Data\TaxRuleInterfaceFactory;
 use Magento\Tax\Api\TaxRateRepositoryInterface;
 use Magento\Tax\Api\TaxRuleRepositoryInterface;
 use Magento\Tax\Model\Calculation\Rate;
 use Magento\Tax\Model\Calculation\RateFactory;
 use Magento\Tax\Model\ResourceModel\Calculation;
-use Magento\Tax\Model\ResourceModel\Calculation\Rate\Collection as ResourceModelCalculationRateCollection;
 use Magento\Tax\Model\ResourceModel\Calculation\Rate\CollectionFactory as ResourceModelCalculationRateCollectionFactory;
-use Magento\Tax\Model\ResourceModel\TaxClass\Collection as ResourceModelTaxClassCollection;
+use Magento\Tax\Model\ResourceModel\Calculation\Rule\CollectionFactory as ResourceModelCalculationRuleCollectionFactory;
 use Magento\Tax\Model\ResourceModel\TaxClass\CollectionFactory as ResourceModelTaxClassCollectionFactory;
 use Magento\TaxImportExport\Model\Rate\CsvImportHandler;
 
@@ -35,56 +33,19 @@ use Magento\TaxImportExport\Model\Rate\CsvImportHandler;
  */
 class ImportTaxRates extends CsvImportHandler implements DataPatchInterface
 {
-    /**
-     * Csv file name
-     */
+    public const MODULE_NAME = 'Easygento_CreateTaxRatesAndRules';
     public const IMPORT_TAX_CSV_FILE_NAME = 'import_tax_rates.csv';
-    /**
-     * Csv PATH
-     */
     public const IMPORT_TAX_CSV_PATH = 'Setup/Csv/';
 
-    /**
-     * @var DirectoryList
-     */
     protected DirectoryList $directoryList;
-    /**
-     * @var Dir
-     */
     protected Dir $moduleDir;
-    /**
-     * @var TaxRateRepositoryInterface
-     */
     protected TaxRateRepositoryInterface $taxRateRepository;
-    /**
-     * @var TaxRuleInterfaceFactory
-     */
     protected TaxRuleInterfaceFactory $taxRuleInterfaceFactory;
-    /**
-     * @var TaxRuleRepositoryInterface
-     */
     protected TaxRuleRepositoryInterface $taxRuleRepository;
-    /**
-     * @var ResourceModelCalculationRateCollectionFactory
-     */
     protected ResourceModelCalculationRateCollectionFactory $resourceModelCalculationRateCollectionFactory;
-    /**
-     * @var ResourceModelTaxClassCollectionFactory
-     */
     protected ResourceModelTaxClassCollectionFactory $resourceModelTaxClassCollectionFactory;
+    protected ResourceModelCalculationRuleCollectionFactory $resourceModelCalculationRuleCollectionFactory;
 
-    /**
-     * @param ResourceModelStoreCollection $storeCollection
-     * @param ResourceModelRegionCollection $regionCollection
-     * @param CountryFactory $countryFactory
-     * @param RateFactory $taxRateFactory
-     * @param Csv $csvProcessor
-     * @param DirectoryList $directoryList
-     * @param Dir $moduleDir
-     * @param TaxRateRepositoryInterface $taxRateRepository
-     * @param ResourceModelCalculationRateCollectionFactory $resourceModelCalculationRateCollectionFactory
-     * @param ResourceModelTaxClassCollectionFactory $resourceModelTaxClassCollectionFactory
-     */
     public function __construct(
         ResourceModelStoreCollection $storeCollection,
         ResourceModelRegionCollection $regionCollection,
@@ -97,7 +58,8 @@ class ImportTaxRates extends CsvImportHandler implements DataPatchInterface
         TaxRuleRepositoryInterface $taxRuleRepository,
         TaxRuleInterfaceFactory $taxRuleInterfaceFactory,
         ResourceModelCalculationRateCollectionFactory $resourceModelCalculationRateCollectionFactory,
-        ResourceModelTaxClassCollectionFactory $resourceModelTaxClassCollectionFactory
+        ResourceModelTaxClassCollectionFactory $resourceModelTaxClassCollectionFactory,
+        ResourceModelCalculationRuleCollectionFactory $resourceModelCalculationRuleCollectionFactory
     ) {
         parent::__construct($storeCollection, $regionCollection, $countryFactory, $taxRateFactory, $csvProcessor);
 
@@ -108,6 +70,7 @@ class ImportTaxRates extends CsvImportHandler implements DataPatchInterface
         $this->taxRuleInterfaceFactory = $taxRuleInterfaceFactory;
         $this->resourceModelCalculationRateCollectionFactory = $resourceModelCalculationRateCollectionFactory;
         $this->resourceModelTaxClassCollectionFactory = $resourceModelTaxClassCollectionFactory;
+        $this->resourceModelCalculationRuleCollectionFactory = $resourceModelCalculationRuleCollectionFactory;
     }
 
     /**
@@ -133,6 +96,7 @@ class ImportTaxRates extends CsvImportHandler implements DataPatchInterface
      */
     public function apply(): void
     {
+        $this->deleteDefaultTaxRule();
         $this->deleteDefaultTaxRate();
         $this->importCsvTaxRateFile();
         $this->createTaxRules();
@@ -142,18 +106,36 @@ class ImportTaxRates extends CsvImportHandler implements DataPatchInterface
      * @return void
      * @throws NoSuchEntityException
      */
+    private function deleteDefaultTaxRule(): void
+    {
+        $collection = $this->resourceModelCalculationRuleCollectionFactory->create();
+        $collection->addFieldToSelect(['tax_calculation_rule_id', 'code']);
+        $collection->addFieldToFilter('code' , 'Rule1');
+        if (!($collection->getSize() > 0)) {
+            return;
+        }
+        $items = $collection->getItems();
+        foreach ($items as $item) {
+            $this->taxRuleRepository->deleteById($item->getData('tax_calculation_rule_id'));
+        }
+    }
+
+    /**
+     * @return void
+     * @throws NoSuchEntityException
+     */
     private function deleteDefaultTaxRate(): void
     {
-        /** @var ResourceModelCalculationRateCollection $collection */
         $collection = $this->resourceModelCalculationRateCollectionFactory->create();
         $collection->addFieldToSelect(['tax_calculation_rate_id', 'tax_country_id']);
         $collection->addFieldToFilter('tax_country_id' , Calculation::USA_COUNTRY_CODE);
+        if (!($collection->getSize() > 0)) {
+            return;
+        }
         $items = $collection->getItems();
-        if (count($items) > 0) {
             foreach ($items as $item) {
                 $this->taxRateRepository->deleteById($item->getData('tax_calculation_rate_id'));
             }
-        }
     }
 
     /**
@@ -163,7 +145,7 @@ class ImportTaxRates extends CsvImportHandler implements DataPatchInterface
     private function importCsvTaxRateFile(): void
     {
         $filename = self::IMPORT_TAX_CSV_FILE_NAME;
-        $modulePath = $this->moduleDir->getDir('Dnd_Tax');
+        $modulePath = $this->moduleDir->getDir(self::MODULE_NAME);
         $file = $modulePath . DIRECTORY_SEPARATOR . self::IMPORT_TAX_CSV_PATH . $filename;
         $ratesRawData = $this->csvProcessor->getData($file);
 
@@ -188,14 +170,12 @@ class ImportTaxRates extends CsvImportHandler implements DataPatchInterface
      */
     private function createTaxRules(): void
     {
-        /** @var ResourceModelTaxClassCollection $collection */
         $collection = $this->resourceModelTaxClassCollectionFactory->create();
         $collection->addFieldToSelect(['class_id', 'class_name']);
         $collection->addFieldToFilter('class_name' , 'Taxable Goods');
         /** @var TaxClassInterface $taxableGoodsClass */
         $taxableGoodsClass =  $collection->setPageSize(1)->getFirstItem();
 
-        /** @var ResourceModelTaxClassCollection $collection */
         $collection = $this->resourceModelTaxClassCollectionFactory->create();
         $collection->addFieldToSelect(['class_id', 'class_name']);
         $collection->addFieldToFilter('class_name' , 'Retail Customer');
@@ -206,7 +186,6 @@ class ImportTaxRates extends CsvImportHandler implements DataPatchInterface
             return;
         }
 
-        /** @var ResourceModelCalculationRateCollection $collection */
         $collection = $this->resourceModelCalculationRateCollectionFactory->create();
         $rateIds = [];
         $rateItems = $collection->getItems();
@@ -216,7 +195,6 @@ class ImportTaxRates extends CsvImportHandler implements DataPatchInterface
             $rateIds[] = $item->getData('tax_calculation_rate_id');
         }
 
-        /** @var TaxRuleInterface $taxRule */
         $taxRule = $this->taxRuleInterfaceFactory->create();
         $taxRule->setCode('PRODUCTS');
         $taxRule->setTaxRateIds($rateIds);
